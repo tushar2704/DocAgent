@@ -1,0 +1,8 @@
+crewai
+streamlit
+llama-index
+nomic
+langchain
+groq
+python-dotenv
+PyPDF2
