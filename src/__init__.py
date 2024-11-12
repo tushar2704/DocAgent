@@ -1,5 +1,4 @@
-from .pdf_utils import PDFProcessor
-from .text_utils import TextProcessor, TextChunker
-from .file_utils import FileHandler
-
-__all__ = ['PDFProcessor', 'TextProcessor', 'TextChunker', 'FileHandler']
+##© 2024 Tushar Aggarwal. All rights reserved.(https://tushar-aggarwal.com)
+##Pixella[Towards-GenAI] (https://github.com/Towards-GenAI)
+##################################################################################################
+#Importing dependencies
