@@ -1,4 +1,4 @@
-crewai
+crewai==0.28.8
 streamlit
 llama-index
 nomic
@@ -6,3 +6,8 @@ langchain
 groq
 python-dotenv
 PyPDF2
+langchain_huggingface
+crewai_tools==0.1.6
+langchain_community==0.0.29
+sentence-transformers
+langchain-groq

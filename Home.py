@@ -1,168 +1,195 @@
+##© 2024 Tushar Aggarwal. All rights reserved.(https://github.com/tushar2704)
 
-import os
+
+
+
+
 import streamlit as st
-# from dotenv import load_dotenv
-from groq import Groq
-from langchain_community.tools import DuckDuckGoSearchRun
-from langchain_groq import ChatGroq 
-from crewai import Agent, Task, Crew, Process
-
-# Load environment variables
-# load_dotenv()
-api_key = st.secrets["GROQ_API_KEY"]
-# Import local components
+import os
+from crewai import Agent, Task, Crew
+from crewai_tools import PDFSearchTool
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_openai import ChatOpenAI
+import requests
 from src.components.navigation import page_config, custom_style, footer
 
+st.set_page_config(page_title="Agentic RAG System", layout="wide")
+custom_style()
+st.title("Agentic RAG Using CrewAI & LangChain")
+st.markdown("#### Built by Tushar Aggarwal")
 
-# Set up Groq LLM client
-groq_llm = ChatGroq(
-    api_key=st.secrets["GROQ_API_KEY"], #or os.getenv("GROQ_API_KEY")
-    model="llama-3.1-8b-instant",  # Specify the model you want to use
-    temperature=0.1,
-    max_tokens=None,
-    timeout=3,
-    max_retries=2,
-)
-
-            
-        
-        
-        
-        
-        
-        
-# Define Agents using Groq LLM
-symptom_analyzer = Agent(
-    role="Symptom Analyzer",
-    goal="Analyze user-reported symptoms and provide structured output.",
-    backstory="You are an expert in analyzing medical symptoms.",
-    llm=groq_llm, 
-    verbose=True
-)
-
-health_advisor = Agent(
-    role="Health Advisor",
-    goal="Provide professional health advice based on symptom analysis.",
-    backstory="You are a medical assistant providing health advice.",
-    llm=groq_llm, 
-    verbose=True
-)
-
-researcher = Agent(
-    role="Researcher",
-    goal="Conduct research on symptoms using external tools like DuckDuckGo.",
-    backstory="You are an expert researcher in healthcare.",
-    llm=groq_llm, 
-    verbose=True
-)
-
-doclib_agent = Agent(
-    role="DocLib Manager",
-    goal="Retrieve relevant medical documents from DocLib.",
-    backstory="You manage and retrieve medical documents from DocLib.",
-    llm=groq_llm, 
-    verbose=True
-)
-
-
-specialist_finder = Agent(
-    role="Local Specialist Finder",
-    goal="Find local area medical specialists based on the user's location and symptoms.",
-    backstory="You are an expert at finding local healthcare providers and specialists.",
-    llm=groq_llm, 
-    verbose=True 
-)
-
-
-# Define Tasks for each agent
-task_symptom_analysis = Task(
-    description="Analyze the user's symptoms and provide structured data.",
-    expected_output='A bullet list of symptoms and their severity',
-    agent=symptom_analyzer,
-)
-
-task_health_advice = Task(
-    description="Generate health advice based on analyzed symptoms.",
-    expected_output='A bullet list of health advice based on analyzed symptoms and intensity',
-    agent=health_advisor,
-)
-
-task_research = Task(
-    description="Perform external research to validate health advice.",
-    expected_output='A summary of external research to validate health advice',
-    agent=researcher,
+# API Key Input Section
+with st.sidebar:
+    st.header("API Configuration")
+    groq_api = st.text_input("Enter your Groq API Key", type="password")
+    tavily_api = st.text_input("Enter your Tavily API Key", type="password")
     
-)
+    if groq_api and tavily_api:
+        os.environ['GROQ_API_KEY'] = groq_api
+        os.environ['TAVILY_API_KEY'] = tavily_api
+        st.success("API Keys set successfully!")
 
-task_doclib = Task(
-    description="Retrieve relevant medical documents.",
-    expected_output='A bullet list of relevant medical documents.',
-    agent=doclib_agent,
-)
+def initialize_llm():
+    return ChatOpenAI(
+        openai_api_base="https://api.groq.com/openai/v1",
+        openai_api_key=os.environ.get('GROQ_API_KEY'),
+        model_name="llama3-8b-8192",
+        temperature=0.1,
+        max_tokens=1000
+    )
 
+def setup_pdf():
+    pdf_url = 'https://proceedings.neurips.cc/paper_files/paper/2017/file/3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf'
+    response = requests.get(pdf_url)
+    with open('attention_is_all_you_need.pdf', 'wb') as file:
+        file.write(response.content)
+    return PDFSearchTool(
+        pdf='attention_is_all_you_need.pdf',
+        config=dict(
+            llm=dict(
+                provider="groq",
+                config=dict(
+                    model="llama3-8b-8192",
+                ),
+            ),
+            embedder=dict(
+                provider="huggingface",
+                config=dict(
+                    model="BAAI/bge-small-en-v1.5",
+                ),
+            ),
+        )
+    )
 
-task_find_specialist = Task(
-    description="Find local area medical specialists based on the user's city and symptoms.",
-    expected_output="A bullet list of relevant medical medical specialists based on the users city and symptoms.",
-    agent=specialist_finder,
-)
+def router_tool(question):
+    """Router Function"""
+    if 'self-attention' in question:
+        return 'vectorstore'
+    else:
+        return 'web_search'
 
+def create_agents(llm):
+    Router_Agent = Agent(
+        role='Router',
+        goal='Route user question to a vectorstore or web search',
+        backstory="You are an expert at routing a user question to a vectorstore or web search.",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+    
+    Retriever_Agent = Agent(
+        role="Retriever",
+        goal="Use the information retrieved from the vectorstore to answer the question",
+        backstory="You are an assistant for question-answering tasks.",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+    
+    Grader_agent = Agent(
+        role='Answer Grader',
+        goal='Filter out erroneous retrievals',
+        backstory="You are a grader assessing relevance of a retrieved document to a user question.",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+    
+    hallucination_grader = Agent(
+        role="Hallucination Grader",
+        goal="Filter out hallucination",
+        backstory="You are a hallucination grader assessing whether an answer is grounded in facts.",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+    
+    answer_grader = Agent(
+        role="Answer Grader",
+        goal="Filter out hallucination from the answer.",
+        backstory="You are a grader assessing whether an answer is useful to resolve a question.",
+        verbose=True,
+        allow_delegation=False,
+        llm=llm
+    )
+    
+    return Router_Agent, Retriever_Agent, Grader_agent, hallucination_grader, answer_grader
 
-
-crew = Crew(
-   agents=[symptom_analyzer, health_advisor, researcher, doclib_agent, specialist_finder],
-   tasks=[task_symptom_analysis, task_health_advice, task_research, task_doclib, task_find_specialist],
-   process=Process.sequential,
-)
-
+def create_tasks(Router_Agent, Retriever_Agent, Grader_agent, hallucination_grader, answer_grader):
+    router_task = Task(
+        description="Analyse the keywords in the question {question}",
+        expected_output="Give a binary choice 'websearch' or 'vectorstore' based on the question",
+        agent=Router_Agent,
+        tools=[router_tool]
+    )
+    
+    retriever_task = Task(
+        description="Based on the response from the router task extract information for the question {question}",
+        expected_output="Return a clear and concise text as response",
+        agent=Retriever_Agent,
+        context=[router_task]
+    )
+    
+    grader_task = Task(
+        description="Based on the response from the retriever task for the question {question}",
+        expected_output="Binary score 'yes' or 'no'",
+        agent=Grader_agent,
+        context=[retriever_task]
+    )
+    
+    hallucination_task = Task(
+        description="Based on the response from the grader task for the question {question}",
+        expected_output="Binary score 'yes' or 'no'",
+        agent=hallucination_grader,
+        context=[grader_task]
+    )
+    
+    answer_task = Task(
+        description="Based on the response from the hallucination task for the question {question}",
+        expected_output="Return a clear and concise response",
+        context=[hallucination_task],
+        agent=answer_grader
+    )
+    
+    return router_task, retriever_task, grader_task, hallucination_task, answer_task
 
 def main():
-    # Streamlit Page Setup
-    page_config("DocLib", "🤖", "wide")
-    custom_style()
-
-    st.title("🤖 DocLib 🤖")
-    st.markdown("### DocLib helps you find specialists nearby while suggesting home remedies for your health issues.")
-
-
-    # Input fields
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        
-        
-        
-        symptoms = st.text_input("Enter your symptoms:")
-
-
-
-    with col2:
-        intensity = st.selectbox("Select symptom intensity:", ["Mild", "Moderate", "Severe"])
-
-    with col3:
-        city = st.text_input("Enter your city (for finding local specialists):")
-
-    # Advice generation
-    if st.button("Get Health Advice and Find Specialists"):
-        inputs = {"symptoms": symptoms, "intensity": intensity, "city": city}
+    if not (os.environ.get('GROQ_API_KEY') and os.environ.get('TAVILY_API_KEY')):
+        st.warning("Please enter your API keys in the sidebar to continue.")
+        return
     
-    try:
-        result = crew.kickoff(inputs=inputs)
-        st.success(f"Health Advice: {result}")
-        
-        # Display document retrieval results from DocLib
-        doc_result = task_doclib.output.raw  
-        st.info(f"Relevant Documents: {doc_result}")
-        
-        # Display specialist search results
-        specialist_result = task_find_specialist.output.raw  
-        st.info(f"Local Specialists in {city}: {specialist_result}")
-        
-    except Exception as e:
-        st.error(f"Error during execution: {e}")
+    st.header("Ask your question")
+    user_question = st.text_input("Enter your question:")
+    
+    if st.button("Get Answer"):
+        if user_question:
+            with st.spinner("Processing your question..."):
+                try:
+                    llm = initialize_llm()
+                    rag_tool = setup_pdf()
+                    web_search_tool = TavilySearchResults(k=3)
+                    
+                    agents = create_agents(llm)
+                    tasks = create_tasks(*agents)
+                    
+                    rag_crew = Crew(
+                        agents=list(agents),
+                        tasks=list(tasks),
+                        verbose=True
+                    )
+                    
+                    result = rag_crew.kickoff(inputs={"question": user_question})
+                    
+                    st.success("Answer generated successfully!")
+                    st.write(result)
+                except Exception as e:
+                    st.error(f"An error occurred: {str(e)}")
+        else:
+            st.warning("Please enter a question.")
 
 if __name__ == "__main__":
     main()
-
-
+    with st.sidebar:
+        footer()
 
